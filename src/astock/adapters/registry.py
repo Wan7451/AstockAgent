@@ -9,7 +9,7 @@
    必须逐一替换。
 """
 from datetime import date, timedelta
-from functools import lru_cache
+from functools import lru_cache, wraps
 
 import pandas as pd
 from tradingagents.dataflows import interface
@@ -62,6 +62,22 @@ def _patched_load_ohlcv(symbol, curr_date):
     return data.reset_index(drop=True)
 
 
+def _tolerant(impl):
+    """无效代码不抛异常，返回纠正提示——LLM 会自行改用正确代码重试，
+    避免上游 docstring 示例（AAPL/TSM）误导分析师时打死整个任务。"""
+    @wraps(impl)
+    def wrapper(*args, **kwargs):
+        try:
+            return impl(*args, **kwargs)
+        except ValueError as e:
+            if "无法识别的A股代码" in str(e):
+                return (f"工具调用错误：{e}。本系统仅支持A股代码"
+                        "（如 600519.SH、002384.SZ），请改用当前分析标的的"
+                        "A股代码重新调用本工具，不要使用美股代码。")
+            raise
+    return wrapper
+
+
 def register() -> None:
     global _orig_load_ohlcv
     if "akshare" not in interface.VENDOR_LIST:
@@ -70,7 +86,7 @@ def register() -> None:
         if method not in interface.VENDOR_METHODS:
             raise RuntimeError(
                 f"上游已移除方法 {method}，请更新适配层（运行 scripts/smoke_upstream.py 排查）")
-        interface.VENDOR_METHODS[method]["akshare"] = impl
+        interface.VENDOR_METHODS[method]["akshare"] = _tolerant(impl)
 
     # 修补 load_ohlcv 的全部名字绑定（from-import 按名绑定，需逐模块替换）
     from tradingagents.dataflows import (market_data_validator,

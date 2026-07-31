@@ -54,3 +54,12 @@ def test_load_ohlcv_patched_for_astock():
         out = registry._patched_load_ohlcv("600519", "2026-07-29")
     assert list(out.columns) == ["Date", "Open", "High", "Low", "Close", "Volume"]
     assert len(out) == 2  # 2026-07-30 被前视过滤裁掉
+
+
+def test_invalid_symbol_returns_hint_not_raise():
+    """LLM 拿上游 docstring 示例代码(AAPL)调工具时，应返回纠正提示而非炸掉任务。"""
+    registry.register()
+    impl = interface.VENDOR_METHODS["get_stock_data"]["akshare"]
+    out = impl("AAPL", "2026-06-01", "2026-07-31")
+    assert isinstance(out, str)
+    assert "仅支持A股" in out and "AAPL" in out
