@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A股投研决策台</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "PingFang SC", sans-serif; background: #f5f6f8; color: #222; }
+  header { background: #1a2b4a; color: #fff; padding: 14px 24px; display: flex; align-items: center; gap: 16px; }
+  header h1 { font-size: 18px; font-weight: 600; }
+  header .tip { font-size: 12px; opacity: .7; }
+  main { display: grid; grid-template-columns: 340px 1fr; gap: 16px; padding: 16px 24px; max-width: 1500px; margin: 0 auto; }
+  .card { background: #fff; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 16px; }
+  .card h2 { font-size: 15px; margin-bottom: 12px; color: #1a2b4a; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eee; }
+  th { color: #888; font-weight: 500; }
+  input, button { font-size: 13px; padding: 7px 10px; border: 1px solid #ddd; border-radius: 6px; }
+  input { width: 100%; margin-bottom: 8px; }
+  button { cursor: pointer; background: #1a2b4a; color: #fff; border: none; }
+  button:hover { opacity: .88; }
+  button.ghost { background: transparent; color: #1a2b4a; border: 1px solid #1a2b4a; }
+  button.danger { background: transparent; color: #c0392b; border: none; padding: 2px 6px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+  .badge.done { background: #e6f7ee; color: #18794e; }
+  .badge.running { background: #fff7e6; color: #b7791f; }
+  .badge.failed { background: #fdecea; color: #c0392b; }
+  .badge.queued { background: #eee; color: #666; }
+  #report { line-height: 1.75; font-size: 14px; }
+  #report h1 { font-size: 20px; margin: 14px 0 8px; }
+  #report h2 { font-size: 16px; margin: 14px 0 8px; color: #1a2b4a; }
+  #report table { margin: 8px 0; }
+  #report code { background: #f0f0f0; padding: 1px 5px; border-radius: 4px; }
+  #report blockquote { border-left: 3px solid #ccc; padding-left: 10px; color: #777; margin: 8px 0; }
+  .row { display: flex; gap: 8px; }
+  .row input { margin-bottom: 0; }
+  #progress { font-size: 12px; color: #b7791f; margin-top: 8px; min-height: 16px; }
+  .muted { color: #999; font-size: 12px; }
+  footer { text-align: center; color: #aaa; font-size: 12px; padding: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📈 A股多智能体投研决策台</h1>
+  <span class="tip">仅供研究参考，不构成投资建议 · 交易请人工执行</span>
+</header>
+<main>
+<div>
+  <div class="card">
+    <h2>自选股池</h2>
+    <div class="row">
+      <input id="w-symbol" placeholder="代码，如 600519">
+      <input id="w-name" placeholder="备注名（选填）">
+      <button onclick="addWatch()">添加</button>
+    </div>
+    <table id="watchlist"><thead><tr><th>代码</th><th>备注</th><th></th><th></th></tr></thead><tbody></tbody></table>
+    <p style="margin-top:10px"><button class="ghost" onclick="runDaily()">▶ 立即全池分析</button></p>
+    <p class="muted" style="margin-top:6px">交易日 15:30 自动分析全池</p>
+  </div>
+  <div class="card">
+    <h2>按需分析</h2>
+    <div class="row">
+      <input id="a-symbol" placeholder="代码，如 000001">
+      <button onclick="startAnalyze()">分析</button>
+    </div>
+    <div id="progress"></div>
+  </div>
+  <div class="card">
+    <h2>分析历史</h2>
+    <table id="analyses"><thead><tr><th>股票</th><th>日期</th><th>状态</th><th>决策</th></tr></thead><tbody></tbody></table>
+  </div>
+</div>
+<div class="card">
+  <h2>决策报告</h2>
+  <div id="report"><p class="muted">点击左侧「分析历史」中已完成的记录查看报告。</p></div>
+</div>
+</main>
+<footer>astock-agent · powered by TradingAgents + akshare</footer>
+<script>
+const $ = s => document.querySelector(s);
+const api = (p, opt) => fetch('/api' + p, opt).then(r => {
+  if (!r.ok) return r.json().then(j => Promise.reject(j.detail || r.status));
+  return r.headers.get('content-type')?.includes('json') ? r.json() : r.text();
+});
+
+async function loadWatchlist() {
+  const list = await api('/watchlist');
+  $('#watchlist tbody').innerHTML = list.map(w =>
+    `<tr><td>${w.symbol}</td><td>${w.name || ''}</td>
+     <td><button class="ghost" style="padding:2px 8px" onclick="analyzeSym('${w.symbol}')">分析</button></td>
+     <td><button class="danger" onclick="delWatch('${w.symbol}')">✕</button></td></tr>`).join('');
+}
+async function addWatch() {
+  const symbol = $('#w-symbol').value.trim();
+  if (!symbol) return;
+  try {
+    await api('/watchlist', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({symbol, name: $('#w-name').value.trim()})});
+    $('#w-symbol').value = ''; $('#w-name').value = '';
+    loadWatchlist();
+  } catch (e) { alert(e); }
+}
+async function delWatch(s) { await api('/watchlist/' + s, {method: 'DELETE'}); loadWatchlist(); }
+async function runDaily() {
+  const r = await api('/run_daily', {method: 'POST'});
+  alert(r.msg); setTimeout(loadAnalyses, 1500);
+}
+
+function analyzeSym(s) { $('#a-symbol').value = s; startAnalyze(); }
+async function startAnalyze() {
+  const symbol = $('#a-symbol').value.trim();
+  if (!symbol) return;
+  try {
+    const r = await api('/analyze', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({symbol})});
+    $('#progress').textContent = `任务 #${r.id} 已提交…`;
+    const es = new EventSource(`/api/analyze/${r.id}/events`);
+    es.onmessage = ev => {
+      $('#progress').textContent = `任务 #${r.id}: ${ev.data}`;
+      loadAnalyses();
+      if (ev.data.startsWith('final:') || ev.data.startsWith('failed:')) {
+        es.close();
+        if (ev.data === 'final:done') { $('#progress').textContent = `任务 #${r.id} 完成 ✓`; showReport(r.id); }
+      }
+    };
+    es.onerror = () => es.close();
+    loadAnalyses();
+  } catch (e) { alert(e); }
+}
+
+async function loadAnalyses() {
+  const list = await api('/analyses?limit=50');
+  $('#analyses tbody').innerHTML = list.map(a =>
+    `<tr style="cursor:${a.status==='done'?'pointer':'default'}"
+         onclick="${a.status==='done'?`showReport(${a.id})`:''}">
+     <td>${a.symbol}</td><td>${a.trade_date}</td>
+     <td><span class="badge ${a.status}">${a.status}</span></td>
+     <td title="${a.error||''}">${(a.decision||a.error||'').slice(0,24)}</td></tr>`).join('');
+}
+async function showReport(id) {
+  const md = await api('/report/' + id);
+  $('#report').innerHTML = marked.parse(md);
+  window.scrollTo({top: 0, behavior: 'smooth'});
+}
+
+loadWatchlist(); loadAnalyses();
+setInterval(loadAnalyses, 30000);
+</script>
+</body>
+</html>
