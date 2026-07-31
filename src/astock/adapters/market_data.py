@@ -72,7 +72,13 @@ def get_stock_data(symbol, start_date, end_date, *args, **kwargs) -> str:
     df = _daily_df(symbol, str(start_date), str(end_date))
     header = (f"# {normalize(symbol)} 日K数据（前复权，{df.attrs.get('source', '')}源）\n"
               f"# 区间: {start_date} ~ {end_date}，共 {len(df)} 根K线\n")
-    return header + df.to_csv(index=False)
+    text = header + df.to_csv(index=False)
+    # 结构分析摘要搭车注入（缠论/威科夫，由 pipeline 预先构建；无则跳过）
+    from ..analysis import structure
+    digest = structure.get_digest(symbol)
+    if digest:
+        text += f"\n## 结构分析摘要（缠论/威科夫）\n{digest}\n"
+    return text
 
 
 def get_indicators(symbol, indicator, curr_date, look_back_days=30,
