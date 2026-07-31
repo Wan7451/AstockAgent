@@ -95,3 +95,69 @@ def get_indicators(symbol, indicator, curr_date, look_back_days=30,
     return (f"# {normalize(symbol)} 技术指标 {indicator}"
             f"（最近{lookback}个交易日，基于前复权日K本地计算）\n"
             + out.to_csv(index=False))
+
+
+# ---------- 结构分析用：周线 / 30分钟 ----------
+
+def _weekly_df(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+    """周K：东财周线接口（主）→ 新浪日K本地重采样（降级）。"""
+    norm = normalize(symbol)
+    start = str(start_date).replace("-", "")
+    end = str(end_date).replace("-", "")
+    try:
+        df = with_retry(ak.stock_zh_a_hist, symbol=to_akshare(norm),
+                        period="weekly", start_date=start, end_date=end,
+                        adjust="qfq", retries=2, delay=1.5)
+        df = df.rename(columns=_COL_MAP)
+        src = "东方财富"
+    except Exception as e:
+        logger.warning("周线源 东方财富 获取 %s 失败，降级新浪重采样: %s", norm, e)
+        d = _sina_daily(norm, start, end)
+        d["date"] = pd.to_datetime(d["date"])
+        df = (d.set_index("date")
+                .resample("W-FRI")
+                .agg({"open": "first", "high": "max", "low": "min",
+                      "close": "last", "volume": "sum", "amount": "sum"})
+                .dropna(subset=["close"]).reset_index())
+        df["date"] = df["date"].dt.strftime("%Y-%m-%d")
+        src = "新浪(日K重采样)"
+    if df.empty:
+        raise _no_data(symbol, f"{src} 未返回周K数据")
+    cols = [c for c in _OUT_COLS if c in df.columns]
+    df = df[cols].reset_index(drop=True)
+    df.attrs["source"] = src
+    return df
+
+
+def _min30_df(symbol: str, end_date: str) -> pd.DataFrame:
+    """30分钟K：东财（主）→ 新浪（降级，约一年深度，数值为字符串）。
+
+    截断到 end_date 当天 15:00，防前视。
+    """
+    norm = normalize(symbol)
+    df, src = None, None
+    try:
+        start_dt = (datetime.strptime(str(end_date), "%Y-%m-%d")
+                    - timedelta(days=240)).strftime("%Y-%m-%d 09:30:00")
+        df = with_retry(ak.stock_zh_a_hist_min_em, symbol=to_akshare(norm),
+                        period="30", adjust="qfq", start_date=start_dt,
+                        end_date=f"{end_date} 15:00:00", retries=2, delay=1.5)
+        df = df.rename(columns={**_COL_MAP, "时间": "date"})
+        src = "东方财富"
+    except Exception as e:
+        logger.warning("30分钟源 东方财富 获取 %s 失败，降级新浪: %s", norm, e)
+        sina_symbol = exchange_of(norm).lower() + to_akshare(norm)
+        df = with_retry(ak.stock_zh_a_minute, symbol=sina_symbol,
+                        period="30", adjust="qfq", retries=2, delay=1.5)
+        df = df.rename(columns={"day": "date"})
+        src = "新浪"
+    if df is None or df.empty:
+        raise _no_data(symbol, "30分钟K东财与新浪源均无数据")
+    for c in ("open", "high", "low", "close", "volume"):
+        df[c] = pd.to_numeric(df[c])
+    df["date"] = df["date"].astype(str)
+    df = df[df["date"] <= f"{end_date} 15:00:00"]
+    cols = [c for c in _OUT_COLS if c in df.columns]
+    df = df[cols].reset_index(drop=True)
+    df.attrs["source"] = src
+    return df

@@ -2,9 +2,12 @@
 import os
 
 from dotenv import load_dotenv
+from pathlib import Path
+
 from tradingagents.default_config import DEFAULT_CONFIG
 
-load_dotenv()
+# 显式定位项目根的 .env，不依赖进程启动时的工作目录
+load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 # deep_think 不稳时可通过环境变量降级：ASTOCK_DEEP_MODEL=deepseek-v4-flash
 DEEP_MODEL = os.getenv("ASTOCK_DEEP_MODEL", "deepseek-v4-pro")
