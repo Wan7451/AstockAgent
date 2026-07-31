@@ -13,6 +13,9 @@
 ├─ Adapters（本项目核心，src/astock/adapters/）
 │    akshare 实现 10 个 vendor 方法，运行时注入上游 VENDOR_METHODS
 │    多源降级：东方财富 → 新浪 / 雪球 / 财联社
+├─ Analysis（src/astock/analysis/）
+│    结构分析：缠论（本地算法）+ 威科夫（特征算法+LLM判定），周/日/30分钟三级别联立
+│    报告独立两章节，摘要注入市场分析师数据流参与主决策
 └─ vendor/TradingAgents ── 上游框架（git submodule，源码零修改）
 ```
 
