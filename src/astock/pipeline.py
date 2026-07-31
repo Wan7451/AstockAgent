@@ -1,10 +1,13 @@
-"""单股分析入口：注册 vendor → 跑完整 TradingAgents 流水线 → 落 Markdown 报告。"""
+"""单股分析入口：注册 vendor → 结构分析 → TradingAgents 流水线 → Markdown 报告。"""
+import logging
 from datetime import date
 from pathlib import Path
 
 from .adapters import registry
 from .adapters.symbols import normalize
 from .config import build_config
+
+logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 DISCLAIMER = ("\n\n---\n> 本报告由多智能体系统自动生成，仅供研究参考，"
@@ -30,6 +33,15 @@ def analyze(symbol: str, trade_date: str | None = None,
     norm = normalize(symbol)
     trade_date = trade_date or date.today().isoformat()
     if progress_cb:
+        progress_cb("structure", f"计算缠论/威科夫结构分析 {norm}")
+    from .analysis import structure
+    try:
+        struct = structure.build(norm, trade_date)
+    except Exception as e:  # 结构分析失败不阻断主流水线
+        logger.warning("结构分析失败（降级跳过）: %s", e)
+        struct = {"chanlun_md": f"> 生成失败：{e}",
+                  "wyckoff_md": f"> 生成失败：{e}", "digest": ""}
+    if progress_cb:
         progress_cb("building", f"初始化多智能体图 {norm} @ {trade_date}")
     graph = TradingAgentsGraph(config=build_config())
     if progress_cb:
@@ -45,6 +57,9 @@ def analyze(symbol: str, trade_date: str | None = None,
         content = final_state.get(key)
         if content:
             lines.append(f"\n## {title}\n\n{content}")
+        if key == "market_report":  # 技术面之后插入结构分析两章节
+            lines.append(f"\n## 缠论视角\n\n{struct['chanlun_md']}")
+            lines.append(f"\n## 威科夫视角\n\n{struct['wyckoff_md']}")
     path.write_text("\n".join(lines) + DISCLAIMER, encoding="utf-8")
     if progress_cb:
         progress_cb("done", str(path))
