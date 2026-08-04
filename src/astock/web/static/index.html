@@ -118,6 +118,13 @@ async function startAnalyze() {
     $('#progress').textContent = `任务 #${r.id} 已提交…`;
     const es = new EventSource(`/api/analyze/${r.id}/events`);
     es.onmessage = ev => {
+      // 心跳消息不覆盖进度文本，仅在非心跳时更新显示
+      if (ev.data.startsWith('heartbeat:')) {
+        if (!$('#progress').textContent.includes('⏳')) {
+          $('#progress').textContent = `任务 #${r.id}: ⏳ 分析进行中…`;
+        }
+        return;
+      }
       $('#progress').textContent = `任务 #${r.id}: ${ev.data}`;
       loadAnalyses();
       if (ev.data.startsWith('final:') || ev.data.startsWith('failed:')) {

@@ -24,6 +24,14 @@ _SECTIONS = [
     ("final_trade_decision", "风控终审"),
 ]
 
+_DECISION_CN: dict[str, str] = {
+    "Buy": "买入",
+    "Overweight": "增持",
+    "Hold": "持有",
+    "Underweight": "减持",
+    "Sell": "卖出",
+}
+
 
 def analyze(symbol: str, trade_date: str | None = None,
             reports_dir: Path | str | None = None, progress_cb=None) -> dict:
@@ -64,4 +72,5 @@ def analyze(symbol: str, trade_date: str | None = None,
     if progress_cb:
         progress_cb("done", str(path))
     return {"symbol": norm, "trade_date": trade_date,
-            "decision": str(decision), "report_path": str(path)}
+            "decision": _DECISION_CN.get(str(decision), str(decision)),
+            "report_path": str(path)}

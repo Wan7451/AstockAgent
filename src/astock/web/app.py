@@ -78,6 +78,16 @@ def start_analyze(req: AnalyzeReq):
     def run():
         store.update_analysis(aid, status="running")
         q.put("running:流水线启动")
+
+        # 心跳线程：每 30s 推送 keepalive，防止 SSE 因 graph.propagate()
+        # 长时间无进度而超时断开（4 分析师 + 多空辩论 + 交易员 + 风控链很长）
+        heartbeat_stop = threading.Event()
+
+        def heartbeat():
+            while not heartbeat_stop.wait(30):
+                q.put("heartbeat:分析进行中…")
+
+        threading.Thread(target=heartbeat, daemon=True).start()
         try:
             res = analyze(norm, td,
                           progress_cb=lambda s, d: q.put(f"{s}:{d}"))
@@ -91,6 +101,8 @@ def start_analyze(req: AnalyzeReq):
                 aid, status="failed", error=str(e)[:500],
                 finished_at=datetime.now().isoformat(timespec="seconds"))
             q.put(f"failed:{str(e)[:200]}")
+        finally:
+            heartbeat_stop.set()
         q.put(None)
 
     threading.Thread(target=run, daemon=True).start()
@@ -107,7 +119,7 @@ def analyze_events(aid: int):
             return
         while True:
             try:
-                msg = q.get(timeout=600)
+                msg = q.get(timeout=1800)
             except queue.Empty:
                 yield "data: timeout\n\n"
                 break
